@@ -184,6 +184,22 @@ def getsides(show=True):
 
         data.append(piece_data)
 
+        print(f"\n{'Piece':<8} {'Side Lengths (true px)':<45} {'Sum'} {'Type':<20} ")
+        print("-" * 80)
+
+        side_offset = 0
+
+        for i, piece_sides in enumerate(sides_list):
+            lengths = [round(r.length) for r in piece_sides]
+            total_length = sum(lengths)
+
+            piece_side_types = data2[side_offset:side_offset + len(piece_sides)]
+            piece_type = str(piece_side_types)
+
+            print(f"{i:<8} {str(lengths):<45} {total_length:.2f} {piece_type:<20}")
+
+            side_offset += len(piece_sides)
+
     with open("pieces_data.json", "w") as f:
         json.dump(data, f, indent=4)
 

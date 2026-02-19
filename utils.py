@@ -173,10 +173,11 @@ def isParallel(line1, line2, visualize=True):
     return bool(parallel)
 
 
-def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250, ax=None):
+def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None, ax=None):
     coords = np.array(polygon.exterior.coords[:-1])
     simplified = rdp(coords, epsilon=epsilon)
     candidate_corners = list(enumerate(simplified))
+    print(f"  Candidate count: {len(candidate_corners)}")
     if ax:
         for idx, pt in candidate_corners:
             ax.plot(pt[0], pt[1], 'ro', markersize=3)
@@ -184,8 +185,14 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
     if len(candidate_corners) < 4:
         return [], candidate_corners, {}
 
-    best_combo = None
-    best_score = float('inf')
+    perimeter = np.sum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
+    if min_length is None:
+        min_length = perimeter * 0.08
+
+    rejected_spacing = 0
+    rejected_zero_sides = 0
+    rejected_min_length = 0
+    top_scores = []
 
     def corner_angle_error_at_index(idx_in_coords, coords_arr, window=1):
         n = len(coords_arr)
@@ -194,7 +201,6 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
         p_before = coords_arr[before_idx]
         p_corner = coords_arr[idx_in_coords]
         p_after = coords_arr[after_idx]
-
         v1 = p_before - p_corner
         v2 = p_after - p_corner
         n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
@@ -204,13 +210,49 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
         angle = np.degrees(np.arccos(cosang))
         return abs(angle - 90.0)
 
+    best_combo = None
+    best_score = float('inf')
+    best_between_counts = []
+
     for combo in combinations(candidate_corners, 4):
         points = [pt for _, pt in combo]
         indices = [idx for idx, _ in combo]
+
+        index_to_position = {idx: pos for pos, (idx, _) in enumerate(candidate_corners)}
+        boundary_positions = [index_to_position[idx] for idx in indices]
+
+        # --- SPACING CHECK ---
+        valid_spacing = True
+        current_between_counts = []
+        for i in range(4):
+            start_pos = boundary_positions[i]
+            end_pos = boundary_positions[(i + 1) % 4]
+
+            if start_pos < end_pos:
+                between_count = end_pos - start_pos - 1
+            else:
+                between_count = len(candidate_corners) - start_pos + end_pos - 1
+
+            current_between_counts.append(between_count)
+
+            if 0 < between_count < 3:
+                valid_spacing = False
+                break
+
+        if not valid_spacing:
+            rejected_spacing += 1
+            continue
+
+        # --- ZERO SIDES CHECK ---
+        zero_sides = sum(1 for b in current_between_counts if b == 0)
+        if zero_sides > 2:
+            rejected_zero_sides += 1
+            continue
+
+        # Angular sort for geometric corner ordering
         sorted_points = sorted(
             points, key=lambda p: np.arctan2(p[1] - polygon.centroid.y, p[0] - polygon.centroid.x)
         )
-
         sorted_indices = []
         for sorted_pt in sorted_points:
             for i, orig_pt in enumerate(points):
@@ -218,37 +260,9 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
                     sorted_indices.append(indices[i])
                     break
 
-        index_to_position = {idx: pos for pos, (idx, _) in enumerate(candidate_corners)}
-        sorted_positions = [index_to_position[idx] for idx in sorted_indices]
-
-        valid_spacing = True
-        for i in range(4):
-            start_pos = sorted_positions[i]
-            end_pos = sorted_positions[(i + 1) % 4]
-
-            if start_pos < end_pos:
-                between_count = end_pos - start_pos - 1
-            else:
-                between_count = len(candidate_corners) - start_pos + end_pos - 1
-
-            if between_count != 0 and between_count < 3:
-                valid_spacing = False
-                break
-
-        if not valid_spacing:
-            continue
-
-        rough_lengths = [
-            np.linalg.norm(sorted_points[i] - sorted_points[(i + 1) % 4])
-            for i in range(4)
-        ]
-        if any(l < min_length for l in rough_lengths):
-            continue
         rdp_indices = [np.argmin(np.linalg.norm(coords - corner, axis=1)) for corner in sorted_points]
 
-        angle_errors = [corner_angle_error_at_index(idx, coords, window=1) for idx in rdp_indices]
-        mean_angle_error = np.mean(angle_errors)
-
+        # --- TRUE LENGTH CALCULATIONS ---
         true_lengths = []
         for i in range(4):
             start = rdp_indices[i]
@@ -260,18 +274,39 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
             seg_length = np.sum(np.linalg.norm(np.diff(segment, axis=0), axis=1))
             true_lengths.append(seg_length)
 
-        std_len = np.std(true_lengths)
+        if any(l < min_length for l in true_lengths):
+            rejected_min_length += 1
+            continue
+
+        angle_errors = [corner_angle_error_at_index(idx, coords, window=1) for idx in rdp_indices]
+        mean_angle_error = np.mean(angle_errors)
+
         mean_len = np.mean(true_lengths)
+        std_len = np.std(true_lengths)
         length_ratio = std_len / (mean_len + 1e-8)
 
-        score = mean_angle_error + length_ratio * 200
+        min_len = min(true_lengths)
+        max_len = max(true_lengths)
+        shortness_penalty = 1.0 - (min_len / (max_len + 1e-8))
+
+        score = mean_angle_error + length_ratio * 50 + shortness_penalty * 100
+
+        top_scores.append((score, [round(l) for l in true_lengths], current_between_counts))
 
         if score < best_score:
             best_score = score
             best_combo = sorted_points
             best_rdp_indices = rdp_indices
+            best_between_counts = current_between_counts
+
+    print(f"  Rejected - spacing: {rejected_spacing} | zero_sides: {rejected_zero_sides} | min_length: {rejected_min_length}")
+    top_scores.sort(key=lambda x: x[0])
+    print(f"  Top 5 scoring combos:")
+    for score, lengths, bc in top_scores[:5]:
+        print(f"    score={score:.2f}  lengths={lengths}  between={bc}")
 
     if best_combo is None:
+        print("❌ No valid quad for this polygon")
         return [], candidate_corners, {}
 
     sorted_pairs = sorted(zip(best_rdp_indices, best_combo), key=lambda x: x[0])
@@ -304,6 +339,9 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=250,
     side_index_dict = {}
     for j, i in enumerate(get_side_corners(labeled)):
         side_index_dict[j] = find_array_with_points(side_points, i)
+
+    print(f"  Best combo between_counts: {best_between_counts}")
+    print(f"  Best score: {best_score:.2f}  lengths={[round(l) for l in true_lengths]}")
     return side_points, candidate_corners, side_index_dict
 
 

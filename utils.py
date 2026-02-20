@@ -243,13 +243,11 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
             rejected_spacing += 1
             continue
 
-        # --- ZERO SIDES CHECK ---
         zero_sides = sum(1 for b in current_between_counts if b == 0)
         if zero_sides > 2:
             rejected_zero_sides += 1
             continue
 
-        # Angular sort for geometric corner ordering
         sorted_points = sorted(
             points, key=lambda p: np.arctan2(p[1] - polygon.centroid.y, p[0] - polygon.centroid.x)
         )

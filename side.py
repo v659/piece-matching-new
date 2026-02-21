@@ -75,7 +75,16 @@ class Side:
 
     @property
     def length(self):
+        """Straight-line distance between endpoints"""
         return np.linalg.norm(np.array(self.p1) - np.array(self.p2))
+
+    @property
+    def path_length(self):
+        """True length along the contour (sum of consecutive point distances)"""
+        pts = np.array(self.side_points)
+        if len(pts) < 2:
+            return 0.0
+        return np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1))
 
     @property
     def angle(self):

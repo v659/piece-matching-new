@@ -187,7 +187,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
 
     perimeter = np.sum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
     if min_length is None:
-        min_length = perimeter * 0.08
+        min_length = perimeter * 0.12
 
     rejected_spacing = 0
     rejected_zero_sides = 0
@@ -213,6 +213,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
     best_combo = None
     best_score = float('inf')
     best_between_counts = []
+    best_true_lengths = []
 
     for combo in combinations(candidate_corners, 4):
         points = [pt for _, pt in combo]
@@ -296,6 +297,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
             best_combo = sorted_points
             best_rdp_indices = rdp_indices
             best_between_counts = current_between_counts
+            best_true_lengths = true_lengths
 
     print(f"  Rejected - spacing: {rejected_spacing} | zero_sides: {rejected_zero_sides} | min_length: {rejected_min_length}")
     top_scores.sort(key=lambda x: x[0])
@@ -339,7 +341,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
         side_index_dict[j] = find_array_with_points(side_points, i)
 
     print(f"  Best combo between_counts: {best_between_counts}")
-    print(f"  Best score: {best_score:.2f}  lengths={[round(l) for l in true_lengths]}")
+    print(f"  Best score: {best_score:.2f}  lengths={[round(l) for l in best_true_lengths]}")
     return side_points, candidate_corners, side_index_dict
 
 

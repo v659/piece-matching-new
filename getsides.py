@@ -190,9 +190,8 @@ def getsides(show=True):
         side_offset = 0
 
         for i, piece_sides in enumerate(sides_list):
-            lengths = [round(r.length) for r in piece_sides]
+            lengths = [round(r.path_length) for r in piece_sides]
             total_length = sum(lengths)
-
             piece_side_types = data2[side_offset:side_offset + len(piece_sides)]
             piece_type = str(piece_side_types)
 

@@ -187,11 +187,12 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
 
     perimeter = np.sum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
     if min_length is None:
-        min_length = perimeter * 0.12
+        min_length = perimeter * 0.1
 
     rejected_spacing = 0
     rejected_zero_sides = 0
     rejected_min_length = 0
+    rejected_perimeter = 0
     top_scores = []
 
     def corner_angle_error_at_index(idx_in_coords, coords_arr, window=1):
@@ -222,7 +223,6 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
         index_to_position = {idx: pos for pos, (idx, _) in enumerate(candidate_corners)}
         boundary_positions = [index_to_position[idx] for idx in indices]
 
-        # --- SPACING CHECK ---
         valid_spacing = True
         current_between_counts = []
         for i in range(4):
@@ -240,9 +240,6 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
                 valid_spacing = False
                 break
 
-        if not valid_spacing:
-            rejected_spacing += 1
-            continue
 
         zero_sides = sum(1 for b in current_between_counts if b == 0)
         if zero_sides > 2:
@@ -261,21 +258,21 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
 
         rdp_indices = [np.argmin(np.linalg.norm(coords - corner, axis=1)) for corner in sorted_points]
 
-        # --- TRUE LENGTH CALCULATIONS ---
         true_lengths = []
         for i in range(4):
-            start = rdp_indices[i]
-            end = rdp_indices[(i + 1) % 4]
-            if start < end:
-                segment = coords[start:end + 1]
-            else:
-                segment = np.concatenate((coords[start:], coords[:end + 1]), axis=0)
-            seg_length = np.sum(np.linalg.norm(np.diff(segment, axis=0), axis=1))
+            p1 = sorted_points[i]
+            p2 = sorted_points[(i + 1) % 4]
+
+            # straight-line corner-to-corner distance
+            seg_length = np.linalg.norm(p2 - p1)
+
             true_lengths.append(seg_length)
 
         if any(l < min_length for l in true_lengths):
             rejected_min_length += 1
             continue
+
+
 
         angle_errors = [corner_angle_error_at_index(idx, coords, window=1) for idx in rdp_indices]
         mean_angle_error = np.mean(angle_errors)
@@ -288,7 +285,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
         max_len = max(true_lengths)
         shortness_penalty = 1.0 - (min_len / (max_len + 1e-8))
 
-        score = mean_angle_error + length_ratio * 50 + shortness_penalty * 100
+        score = mean_angle_error + length_ratio * 200 + shortness_penalty * 20
 
         top_scores.append((score, [round(l) for l in true_lengths], current_between_counts))
 
@@ -299,7 +296,7 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
             best_between_counts = current_between_counts
             best_true_lengths = true_lengths
 
-    print(f"  Rejected - spacing: {rejected_spacing} | zero_sides: {rejected_zero_sides} | min_length: {rejected_min_length}")
+    print(f"  Rejected - spacing: {rejected_spacing} | zero_sides: {rejected_zero_sides} | min_length: {rejected_min_length} | perimeter: {rejected_perimeter}")
     top_scores.sort(key=lambda x: x[0])
     print(f"  Top 5 scoring combos:")
     for score, lengths, bc in top_scores[:5]:

@@ -78,6 +78,17 @@ def getsides(show=True):
             piece_count += 1
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2)
+            center = poly.representative_point()
+            ax.text(
+                center.x,
+                center.y,
+                str(piece_count),
+                fontsize=10,
+                color='darkred',
+                ha='center',
+                va='center',
+                bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
+            )
 
             sides, candidate_corners, side_index_dict = detect_polygon_corners_by_rdp(poly, ax2)
             for idx, pt in candidate_corners:
@@ -98,7 +109,7 @@ def getsides(show=True):
                 sides_list_copy.append(side_obj_copy)
                 sides_list.append(side_obj)
 
-                # Color based on index
+
                 color = cmap(i % 20)
 
                 ax2.plot(side_arr[:, 0], side_arr[:, 1], color=color, linewidth=2)

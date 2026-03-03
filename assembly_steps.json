@@ -1,0 +1,333 @@
+{
+  "coordinate_frame": "image_xy",
+  "rotation_convention": "positive_degrees_counterclockwise",
+  "assumption": "rotate each picked piece around its current centroid, then apply move delta",
+  "piece_plans": [
+    {
+      "piece_id": 0,
+      "rotate_degrees": 145.43351707225483,
+      "move": {
+        "x": 654.6898317980316,
+        "y": -80.34443957818758
+      }
+    },
+    {
+      "piece_id": 1,
+      "rotate_degrees": -51.33195113391616,
+      "move": {
+        "x": 529.2225572832886,
+        "y": 277.57723366799155
+      }
+    },
+    {
+      "piece_id": 2,
+      "rotate_degrees": 0.0,
+      "move": {
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    {
+      "piece_id": 3,
+      "rotate_degrees": 139.85181474883197,
+      "move": {
+        "x": 838.5081118775247,
+        "y": 617.2672755620162
+      }
+    },
+    {
+      "piece_id": 4,
+      "rotate_degrees": 63.03479361775134,
+      "move": {
+        "x": -163.91720202836154,
+        "y": -182.49469103750357
+      }
+    },
+    {
+      "piece_id": 5,
+      "rotate_degrees": -79.07923566433347,
+      "move": {
+        "x": 472.23351476931623,
+        "y": -99.63163848911927
+      }
+    },
+    {
+      "piece_id": 6,
+      "rotate_degrees": -92.74337927675371,
+      "move": {
+        "x": 873.2360142900209,
+        "y": 946.6063935926829
+      }
+    },
+    {
+      "piece_id": 7,
+      "rotate_degrees": -173.48532474647658,
+      "move": {
+        "x": 233.0320890048298,
+        "y": 427.3192968392814
+      }
+    },
+    {
+      "piece_id": 8,
+      "rotate_degrees": 45.41780368625906,
+      "move": {
+        "x": 178.70891241101003,
+        "y": 490.38362341843936
+      }
+    },
+    {
+      "piece_id": 9,
+      "rotate_degrees": 169.20525999378143,
+      "move": {
+        "x": 135.47577539854683,
+        "y": 778.7596812499853
+      }
+    },
+    {
+      "piece_id": 10,
+      "rotate_degrees": -40.19801664459291,
+      "move": {
+        "x": 308.3130332735875,
+        "y": 506.8673891057756
+      }
+    },
+    {
+      "piece_id": 11,
+      "rotate_degrees": -26.41148624239125,
+      "move": {
+        "x": 598.049243852028,
+        "y": 1037.3547772656898
+      }
+    }
+  ],
+  "steps": [
+    {
+      "command": "pickup piece",
+      "piece_id": 0
+    },
+    {
+      "command": "rotate",
+      "piece_id": 0,
+      "degrees": 145.43351707225483
+    },
+    {
+      "command": "move",
+      "piece_id": 0,
+      "x": 654.6898317980316,
+      "y": -80.34443957818758
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 0
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 1
+    },
+    {
+      "command": "rotate",
+      "piece_id": 1,
+      "degrees": -51.33195113391616
+    },
+    {
+      "command": "move",
+      "piece_id": 1,
+      "x": 529.2225572832886,
+      "y": 277.57723366799155
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 1
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 2
+    },
+    {
+      "command": "rotate",
+      "piece_id": 2,
+      "degrees": 0.0
+    },
+    {
+      "command": "move",
+      "piece_id": 2,
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 2
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 3
+    },
+    {
+      "command": "rotate",
+      "piece_id": 3,
+      "degrees": 139.85181474883197
+    },
+    {
+      "command": "move",
+      "piece_id": 3,
+      "x": 838.5081118775247,
+      "y": 617.2672755620162
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 3
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 4
+    },
+    {
+      "command": "rotate",
+      "piece_id": 4,
+      "degrees": 63.03479361775134
+    },
+    {
+      "command": "move",
+      "piece_id": 4,
+      "x": -163.91720202836154,
+      "y": -182.49469103750357
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 4
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 5
+    },
+    {
+      "command": "rotate",
+      "piece_id": 5,
+      "degrees": -79.07923566433347
+    },
+    {
+      "command": "move",
+      "piece_id": 5,
+      "x": 472.23351476931623,
+      "y": -99.63163848911927
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 5
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 6
+    },
+    {
+      "command": "rotate",
+      "piece_id": 6,
+      "degrees": -92.74337927675371
+    },
+    {
+      "command": "move",
+      "piece_id": 6,
+      "x": 873.2360142900209,
+      "y": 946.6063935926829
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 6
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 7
+    },
+    {
+      "command": "rotate",
+      "piece_id": 7,
+      "degrees": -173.48532474647658
+    },
+    {
+      "command": "move",
+      "piece_id": 7,
+      "x": 233.0320890048298,
+      "y": 427.3192968392814
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 7
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 8
+    },
+    {
+      "command": "rotate",
+      "piece_id": 8,
+      "degrees": 45.41780368625906
+    },
+    {
+      "command": "move",
+      "piece_id": 8,
+      "x": 178.70891241101003,
+      "y": 490.38362341843936
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 8
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 9
+    },
+    {
+      "command": "rotate",
+      "piece_id": 9,
+      "degrees": 169.20525999378143
+    },
+    {
+      "command": "move",
+      "piece_id": 9,
+      "x": 135.47577539854683,
+      "y": 778.7596812499853
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 9
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 10
+    },
+    {
+      "command": "rotate",
+      "piece_id": 10,
+      "degrees": -40.19801664459291
+    },
+    {
+      "command": "move",
+      "piece_id": 10,
+      "x": 308.3130332735875,
+      "y": 506.8673891057756
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 10
+    },
+    {
+      "command": "pickup piece",
+      "piece_id": 11
+    },
+    {
+      "command": "rotate",
+      "piece_id": 11,
+      "degrees": -26.41148624239125
+    },
+    {
+      "command": "move",
+      "piece_id": 11,
+      "x": 598.049243852028,
+      "y": 1037.3547772656898
+    },
+    {
+      "command": "drop piece",
+      "piece_id": 11
+    }
+  ]
+}

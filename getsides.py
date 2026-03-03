@@ -34,7 +34,7 @@ def getsides(show=True):
     ax_bin.imshow(binarized, cmap='gray')
     ax_bin.axis('off')
     fig_bin.tight_layout()
-    fig_bin.savefig("binarized_image.png")
+    fig_bin.savefig("results/binarized_image.png")
 
     img_draw = np.array(image.convert("RGB"))  # For visualization
     boxes = get_blobs(img_np, draw_on=img_draw)
@@ -90,7 +90,9 @@ def getsides(show=True):
                 bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
             )
 
-            sides, candidate_corners, side_index_dict = detect_polygon_corners_by_rdp(poly, ax2)
+            sides, candidate_corners, side_index_dict, _best_rdp_indices = detect_polygon_corners_by_rdp(poly, ax2)
+            for idx, pt in candidate_corners:
+                ax.plot(pt[0], pt[1], 'ro', markersize=3)
             for idx, pt in candidate_corners:
                 ax2.plot(pt[0], pt[1], 'ro', markersize=4)
 
@@ -219,9 +221,9 @@ def getsides(show=True):
     fig2.gca().invert_yaxis()
     fig3.gca().invert_yaxis()
     print('done')
-    fig.savefig("piece_shapes.png")
-    fig2.savefig("side_segments.png")
-    fig3.savefig("classified")
+    fig.savefig("results/piece_shapes.png")
+    fig2.savefig("results/side_segments.png")
+    fig3.savefig("results/classified")
     if show:
         plt.show(block=True)
 

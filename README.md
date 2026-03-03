@@ -1,92 +1,103 @@
-# Piece Matching Project
+# Piece Matching v1.0
 
-## Overview
+A research-style Python project that extracts jigsaw piece boundaries from an image and attempts to assemble the puzzle by matching complementary side profiles.
 
-This project is designed to analyze and solve jigsaw puzzles from images. It processes puzzle piece images, extracts and classifies their sides (flat, inward, or outward), and attempts to assemble the puzzle by matching compatible sides using geometric transformations, similarity scoring, and a BFS-based placement algorithm.
-This project is not completed, so results will not be good. Please do not ask for any other puzzles support or for PR's right now. Thankyou.
-The main components include:
-- Image processing to detect and binarize puzzle pieces.
-- Side extraction and classification.
-- Matching sides based on shape similarity using techniques like Hausdorff distance and LSH clustering.
-- Puzzle assembly with transformations to align matching sides.
+## Current Status
 
-Key files in the project:
-- `getsides.py`: Extracts sides from the input image and generates visualizations and JSON data.
-- `solve.py`: Loads extracted data and solves the puzzle by matching and placing pieces.
-- `utils.py`: Utility functions for image processing, geometry, and matching.
-- `side.py`: Defines the `Side` class for representing and manipulating puzzle sides.
-- Data files: `pieces_data.json` (piece and side data), `types_data.json` (side types), and various PNG outputs for visualizations.
+This project is experimental and currently optimized for the author’s sample images. Solver quality can vary significantly across inputs.
 
-## Installation
+## Repository Layout
 
-1. Ensure you have Python 3.14.0 installed.
-2. Set up a virtual environment (virtualenv is configured for this project):
-   ```
-   virtualenv .venv
-   source .venv/bin/activate  # On macOS/Linux
-   .venv\Scripts\activate     # On Windows
-   ```
-3. Install the required packages:
-   ```
-   pip install matplotlib numpy opencv-python pillow pyparsing scikit-learn scipy
-   ```
-   Note: The project uses these packages; do not use other package managers unless specified.
+- `getsides.py`: Detects pieces, extracts side segments, classifies side types, and writes piece metadata.
+- `solve.py`: Matches sides, estimates piece poses, builds an assembled layout, and writes movement plans.
+- `side.py`: `Side` model and geometry helpers for individual piece sides.
+- `utils.py`: Image preprocessing, contour extraction, corner detection, and shape utilities.
+- `images/`: Sample puzzle images.
+- `results/`: Optional output folder (not currently used by scripts by default).
 
-## Usage
+## Requirements
 
-1. Place your puzzle image in the project root (e.g., `IMG_9868.jpg`).
-2. Run side extraction:
-   ```
-   python getsides.py
-   ```
-   This generates:
-   - `binarized_image.png`: Binarized version of the input.
-   - `piece_shapes.png`: Visualized piece shapes.
-   - `side_segments.png`: Detected sides with labels.
-   - `classified.png`: Rotated sides with classifications.
-   - `pieces_data.json`: Detailed side data for each piece.
-   - `types_data.json`: Side type classifications.
+- Python 3.12+ (project appears to have been run with 3.12/3.14)
+- macOS/Linux/Windows
 
-3. Solve the puzzle:
-   ```
-   python solve.py
-   ```
-   This loads the JSON data, computes matches, and assembles the puzzle, printing placement details and connections.
+Install dependencies:
 
-## How It Works
+```bash
+pip install numpy scipy matplotlib opencv-python pillow shapely scikit-learn rdp pyparsing six
+```
 
-1. **Image Processing (`getsides.py`)**:
-   - Binarizes the input image and detects blobs (pieces).
-   - Extracts edges and simplifies them using the Ramer-Douglas-Peucker (RDP) algorithm.
-   - Detects corners and segments sides.
-   - Classifies sides as flat, inward (trough), or outward (bulge).
-   - Normalizes and rotates sides for comparison.
+## Quick Start
 
-2. **Side Matching and Puzzle Solving (`solve.py`)**:
-   - Loads piece data and uses Locality-Sensitive Hashing (LSH) with Gaussian Random Projection for fuzzy clustering of similar shapes.
-   - Computes candidate matches between bulges and troughs using Hausdorff distance.
-   - Uses BFS to place pieces starting from an anchor, applying rotations and translations to align matches.
-   - Handles unplaced pieces by offsetting them around the assembly.
+1. Create and activate a virtual environment:
 
-3. **Utilities and Side Class**:
-   - `utils.py` provides functions for binarization, blob detection, geometry operations, normalization, and scoring.
-   - `side.py` encapsulates side properties like points, index, length, angle, type, and normalization.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
-## Dependencies
+2. Configure input image path in `utils.py`.
 
-- matplotlib
-- numpy
-- opencv-python (cv2)
-- pillow (PIL)
-- pyparsing
-- scikit-learn
-- scipy
-- six
-- rdp (for polygon simplification)
+The pipeline reads a hardcoded path:
 
-These are installed via pip in the virtualenv.
+```python
+image_path = resource_path("puzzle-final3.png")
+```
+
+Update it to a real file path in your workspace, for example:
+
+```python
+image_path = resource_path("images/puzzle-final3.png")
+```
+
+3. Extract sides:
+
+```bash
+python getsides.py
+```
+
+4. Solve puzzle layout:
+
+```bash
+python solve.py
+```
+
+Optional: force fresh side extraction before solving:
+
+```bash
+python solve.py --refresh-sides
+```
+
+## Generated Files
+
+Running `getsides.py` writes:
+
+- `binarized_image.png`
+- `piece_shapes.png`
+- `side_segments.png`
+- `classified` (saved without extension in current code)
+- `pieces_data.json`
+- `types_data.json`
+
+Running `solve.py` writes:
+
+- `solved_assembly.png`
+- `assembly_steps.json`
+
+`solve.py` also attempts to display an interactive animation window.
+
+## Solver Notes
+
+- Side matching is based on profile similarity features and assignment across outward/inward side pairs.
+- Placement starts from an anchor piece, then grows using geometric alignment and overlap checks.
+- Remaining pieces are attached with relaxed thresholds when confident matches are not found in the first pass.
+- Output includes per-piece rotation/translation instructions in `assembly_steps.json`.
+
+## Known Limitations
+
+- Input image selection is currently hardcoded in `utils.py`.
+- Side classification and matching heuristics are sensitive to image quality, thresholding, and erosion settings.
+- The project does not guarantee a correct full solve on arbitrary puzzles.
 
 ## License
 
-See the MIT LISCENCE file for details.
-
+MIT. See Liscence file for details.

@@ -12,7 +12,6 @@ from scipy.interpolate import splprep, splev
 from scipy.spatial.distance import directed_hausdorff
 from shapely.geometry import Polygon, LineString
 
-
 def resource_path(relative_path):
     try:
         # When runnng from the exe
@@ -25,7 +24,7 @@ def resource_path(relative_path):
 
 
 # Example usage
-image_path = resource_path("IMG_9868.jpg")
+image_path = resource_path("images/puzzle-final3.png")
 image = Image.open(image_path)
 
 
@@ -41,7 +40,7 @@ def find_array_with_points(sides, pts):
     raise ValueError("No array contains both points.")
 
 
-def binarize_image(img, thresh=100, erode_iterations=2, kernel_size=3):
+def binarize_image(img, thresh=150, erode_iterations=2, kernel_size=3):
     img = img.convert('L')
     img_np = np.array(img)
     binarized_np = (img_np > thresh).astype(np.uint8) * 255
@@ -52,19 +51,60 @@ def binarize_image(img, thresh=100, erode_iterations=2, kernel_size=3):
     return Image.fromarray(eroded_np), eroded_np // 255
 
 
-def get_blobs(binarized_np, min_area=50000, draw_on=None):
+def get_blobs(binarized_np, min_area=5000, draw_on=None, merge_dist=300):
+    # ensure uint8 binary image
     binary = (binarized_np * 255).astype(np.uint8) if binarized_np.max() <= 1 else binarized_np.copy()
+
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    boxes = []
-    for contour in contours:
-        # Skip small areas
-        if cv2.contourArea(contour) < min_area:
+    # filter small contours
+    contours = [c for c in contours if cv2.contourArea(c) >= min_area]
+
+    if not contours:
+        return []
+
+    # compute centroids
+    centroids = [np.mean(c.reshape(-1, 2), axis=0) for c in contours]
+
+    # ---- CLUSTER CLOSE BLOBS ----
+    clusters = []
+    visited = set()
+
+    for i in range(len(contours)):
+        if i in visited:
             continue
+
+        stack = [i]
+        cluster_idx = []
+
+        while stack:
+            idx = stack.pop()
+            if idx in visited:
+                continue
+
+            visited.add(idx)
+            cluster_idx.append(idx)
+
+            for j in range(len(contours)):
+                if j in visited:
+                    continue
+                if np.linalg.norm(centroids[idx] - centroids[j]) < merge_dist:
+                    stack.append(j)
+
+        clusters.append(cluster_idx)
+
+    # ---- MERGE CLUSTERS ----
+    merged_contours = []
+    for cluster in clusters:
+        merged = np.vstack([contours[i] for i in cluster])
+        merged_contours.append(merged)
+
+    # ---- COMPUTE BOXES ----
+    boxes = []
+    for contour in merged_contours:
         rect = cv2.minAreaRect(contour)
         box = cv2.boxPoints(rect)
         box = np.intp(box)
-
         boxes.append(box)
 
         if draw_on is not None:
@@ -173,26 +213,96 @@ def isParallel(line1, line2, visualize=True):
     return bool(parallel)
 
 
-def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None, ax=None):
+def is_segment_straight(points,
+                        sample_count=50,
+                        tolerance=50,
+                        max_far_ratio=0.40):
+    """
+    Determines if a side is straight using deviation statistics.
+
+    Steps:
+    1. Resample the segment into exactly `sample_count` equally spaced points.
+    2. Compute perpendicular deviation from the baseline.
+    3. Count how many deviations exceed `tolerance`.
+    4. If more than `max_far_ratio` are far → NOT straight.
+
+    Returns
+    -------
+    bool
+    """
+
+    if len(points) < 2:
+        return False
+
+    points = np.asarray(points, dtype=float)
+
+    p1 = points[0]
+    p2 = points[-1]
+
+    baseline = p2 - p1
+    length = np.linalg.norm(baseline)
+
+    if length < 1e-8:
+        return False
+
+    unit = baseline / length
+
+    seg_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    cumulative = np.insert(np.cumsum(seg_lengths), 0, 0)
+
+    total_length = cumulative[-1]
+    if total_length == 0:
+        return False
+
+    target_distances = np.linspace(0, total_length, sample_count)
+
+    resampled = []
+    seg_index = 0
+
+    for td in target_distances:
+        while seg_index < len(cumulative) - 1 and cumulative[seg_index + 1] < td:
+            seg_index += 1
+
+        t0 = cumulative[seg_index]
+        t1 = cumulative[seg_index+1]
+
+        if t1 - t0 == 0:
+            resampled.append(points[seg_index])
+        else:
+            ratio = (td - t0) / (t1 - t0)
+            interp = points[seg_index] + ratio * (points[seg_index+1] - points[seg_index])
+            resampled.append(interp)
+
+    resampled = np.array(resampled)
+    resampled = np.asarray(resampled[:sample_count])
+    deviations = np.abs(np.cross(unit, resampled - p1))
+
+    far_count = np.sum(deviations > tolerance)
+
+    far_ratio = far_count / sample_count
+
+    return far_ratio <= max_far_ratio
+
+def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=20, min_length=None, ax=None):
     coords = np.array(polygon.exterior.coords[:-1])
     simplified = rdp(coords, epsilon=epsilon)
     candidate_corners = list(enumerate(simplified))
     print(f"  Candidate count: {len(candidate_corners)}")
+
     if ax:
         for idx, pt in candidate_corners:
             ax.plot(pt[0], pt[1], 'ro', markersize=3)
 
     if len(candidate_corners) < 4:
-        return [], candidate_corners, {}
+        return [], candidate_corners, {}, []
 
     perimeter = np.sum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
     if min_length is None:
-        min_length = perimeter * 0.1
+        min_length = perimeter * 0.08
 
-    rejected_spacing = 0
     rejected_zero_sides = 0
     rejected_min_length = 0
-    rejected_perimeter = 0
+    rejected_not_straight = 0
     top_scores = []
 
     def corner_angle_error_at_index(idx_in_coords, coords_arr, window=1):
@@ -215,31 +325,40 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
     best_score = float('inf')
     best_between_counts = []
     best_true_lengths = []
+    best_rdp_indices = []
+    best_side_points = []
 
-    for combo in combinations(candidate_corners, 4):
+    if len(candidate_corners) == 4:
+        best_combo = sorted(
+            [pt for _, pt in candidate_corners],
+            key=lambda p: np.arctan2(p[1] - polygon.centroid.y,
+                                     p[0] - polygon.centroid.x)
+        )
+        best_rdp_indices = [
+            np.argmin(np.linalg.norm(coords - corner, axis=1))
+            for corner in best_combo
+        ]
+        best_true_lengths = [
+            np.linalg.norm(best_combo[(i + 1) % 4] - best_combo[i])
+            for i in range(4)
+        ]
+
+    for combo in combinations(candidate_corners, 4) if len(candidate_corners) > 4 else []:
         points = [pt for _, pt in combo]
         indices = [idx for idx, _ in combo]
 
         index_to_position = {idx: pos for pos, (idx, _) in enumerate(candidate_corners)}
         boundary_positions = [index_to_position[idx] for idx in indices]
 
-        valid_spacing = True
         current_between_counts = []
         for i in range(4):
             start_pos = boundary_positions[i]
             end_pos = boundary_positions[(i + 1) % 4]
-
             if start_pos < end_pos:
                 between_count = end_pos - start_pos - 1
             else:
                 between_count = len(candidate_corners) - start_pos + end_pos - 1
-
             current_between_counts.append(between_count)
-
-            if 0 < between_count < 3:
-                valid_spacing = False
-                break
-
 
         zero_sides = sum(1 for b in current_between_counts if b == 0)
         if zero_sides > 2:
@@ -247,36 +366,58 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
             continue
 
         sorted_points = sorted(
-            points, key=lambda p: np.arctan2(p[1] - polygon.centroid.y, p[0] - polygon.centroid.x)
+            points,
+            key=lambda p: np.arctan2(p[1] - polygon.centroid.y,
+                                     p[0] - polygon.centroid.x)
         )
-        sorted_indices = []
-        for sorted_pt in sorted_points:
-            for i, orig_pt in enumerate(points):
-                if np.allclose(sorted_pt, orig_pt):
-                    sorted_indices.append(indices[i])
-                    break
 
-        rdp_indices = [np.argmin(np.linalg.norm(coords - corner, axis=1)) for corner in sorted_points]
+        rdp_indices = [
+            np.argmin(np.linalg.norm(coords - corner, axis=1))
+            for corner in sorted_points
+        ]
 
-        true_lengths = []
-        for i in range(4):
-            p1 = sorted_points[i]
-            p2 = sorted_points[(i + 1) % 4]
-
-            # straight-line corner-to-corner distance
-            seg_length = np.linalg.norm(p2 - p1)
-
-            true_lengths.append(seg_length)
+        true_lengths = [
+            np.linalg.norm(sorted_points[(i + 1) % 4] - sorted_points[i])
+            for i in range(4)
+        ]
 
         if any(l < min_length for l in true_lengths):
             rejected_min_length += 1
             continue
 
+        # ---- MOVED STRAIGHTNESS CHECK HERE ----
+        ordered_pairs = sorted(zip(rdp_indices, sorted_points), key=lambda x: x[0])
+        ordered_indices = [idx for idx, _ in ordered_pairs]
 
+        temp_side_points = []
+        straight_fail = False
 
-        angle_errors = [corner_angle_error_at_index(idx, coords, window=1) for idx in rdp_indices]
+        for i in range(4):
+            start = ordered_indices[i]
+            end = ordered_indices[(i + 1) % 4]
+
+            if start < end:
+                segment = coords[start:end + 1]
+            else:
+                segment = np.concatenate((coords[start:], coords[:end + 1]), axis=0)
+
+            if not is_segment_straight(segment):
+                rejected_not_straight += 1
+                straight_fail = True
+                break
+
+            temp_side_points.append(np.array(segment))
+
+        if straight_fail:
+            continue
+        # ----------------------------------------
+
+        angle_errors = [
+            corner_angle_error_at_index(idx, coords, window=1)
+            for idx in rdp_indices
+        ]
+
         mean_angle_error = np.mean(angle_errors)
-
         mean_len = np.mean(true_lengths)
         std_len = np.std(true_lengths)
         length_ratio = std_len / (mean_len + 1e-8)
@@ -286,7 +427,6 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
         shortness_penalty = 1.0 - (min_len / (max_len + 1e-8))
 
         score = mean_angle_error + length_ratio * 200 + shortness_penalty * 20
-
         top_scores.append((score, [round(l) for l in true_lengths], current_between_counts))
 
         if score < best_score:
@@ -295,54 +435,27 @@ def detect_polygon_corners_by_rdp(polygon, ax2=None, epsilon=50, min_length=None
             best_rdp_indices = rdp_indices
             best_between_counts = current_between_counts
             best_true_lengths = true_lengths
-
-    print(f"  Rejected - spacing: {rejected_spacing} | zero_sides: {rejected_zero_sides} | min_length: {rejected_min_length} | perimeter: {rejected_perimeter}")
-    top_scores.sort(key=lambda x: x[0])
-    print(f"  Top 5 scoring combos:")
-    for score, lengths, bc in top_scores[:5]:
-        print(f"    score={score:.2f}  lengths={lengths}  between={bc}")
+            best_side_points = temp_side_points
 
     if best_combo is None:
-        print("❌ No valid quad for this polygon")
-        return [], candidate_corners, {}
+        return [], candidate_corners, {}, []
 
-    sorted_pairs = sorted(zip(best_rdp_indices, best_combo), key=lambda x: x[0])
-    ordered_indices = [idx for idx, _ in sorted_pairs]
-    validated_side_points = []
-    for i in range(4):
-        start = ordered_indices[i]
-        end = ordered_indices[(i + 1) % 4]
-        if start < end:
-            segment = coords[start:end + 1]
-        else:
-            segment = np.concatenate((coords[start:], coords[:end + 1]), axis=0)
-        if (np.linalg.norm(segment[0] - coords[start]) > 1e-3 or
-                np.linalg.norm(segment[-1] - coords[end]) > 1e-3):
-            print(f"Skipping side {i} due to improper endpoints")
-            continue
-        validated_side_points.append(np.array(segment))
-    side_points = validated_side_points
+    side_points = best_side_points
 
     point_to_sides = defaultdict(list)
     for side_idx, side in enumerate(side_points):
         for pt in map(tuple, side):
             point_to_sides[pt].append(side_idx)
 
-    for pt, sides in point_to_sides.items():
-        if len(sides) > 1 and ax2:
-            ax2.plot(pt[0], pt[1], 'yx', markersize=10)
-
     labeled = label_box_corners(best_combo)
     side_index_dict = {}
     for j, i in enumerate(get_side_corners(labeled)):
         side_index_dict[j] = find_array_with_points(side_points, i)
 
-    print(f"  Best combo between_counts: {best_between_counts}")
-    print(f"  Best score: {best_score:.2f}  lengths={[round(l) for l in best_true_lengths]}")
-    return side_points, candidate_corners, side_index_dict
+    return side_points, candidate_corners, side_index_dict, best_rdp_indices
 
 
-def classify_side_shape(obj, ax=None, flat_threshold=100):
+def classify_side_shape(obj, ax=None, flat_threshold=5):
     """Classifies the type of shape"""
     # Handle the Side object or numpy array
     if hasattr(obj, "side_points"):

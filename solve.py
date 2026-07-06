@@ -216,6 +216,244 @@ def overlap_is_bad(new_poly, placed_polys, area_ratio_limit=0.015, abs_area_limi
     return False
 
 
+def build_non_overlapping_drop_order(
+    placements,
+    pieces,
+    piece_ids,
+    area_ratio_limit=0.10,
+    abs_area_limit=0.0,
+):
+    max_layers = 3
+    min_stack_overlap = 0.70
+    all_ids = sorted(piece_ids)
+
+    contours = {}
+    initial_centers = {}
+    final_centers = {}
+    final_thetas = {}
+    for pid in all_ids:
+        contour = np.asarray(pieces[pid]["contour"], dtype=float)
+        contours[pid] = contour
+        c0 = contour.mean(axis=0) if len(contour) else np.zeros(2, dtype=float)
+        initial_centers[pid] = c0
+        R, t = placements[pid]
+        final_centers[pid] = (c0 @ R.T) + t
+        final_thetas[pid] = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+
+    def poly_at(pid, center, theta_deg):
+        contour = contours[pid]
+        if len(contour) < 3:
+            return None
+        c0 = initial_centers[pid]
+        R = rot2d(math.radians(theta_deg))
+        pts = (contour - c0) @ R.T + np.asarray(center, dtype=float)
+        poly = Polygon(pts)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty or poly.area <= 1e-6:
+            return None
+        return poly
+
+    current_pose = {pid: {"center": initial_centers[pid].copy(), "theta": 0.0} for pid in all_ids}
+    state = {pid: "active" for pid in all_ids}  # active|final
+    final_remaining = set(all_ids)
+
+    stacks = {}
+    piece_stack = {}
+    next_stack_id = 0
+    operations = []
+
+    def stack_top(pid):
+        sid = piece_stack.get(pid)
+        if sid is None:
+            return pid
+        return stacks[sid][-1]
+
+    def is_top_pickable(pid):
+        if state[pid] == "final":
+            return False
+        sid = piece_stack.get(pid)
+        if sid is None:
+            return True
+        return stacks[sid][-1] == pid
+
+    def depth_of_support(pid):
+        sid = piece_stack.get(pid)
+        if sid is None:
+            return 1
+        return len(stacks[sid])
+
+    def detach_from_stack(pid):
+        sid = piece_stack.get(pid)
+        if sid is None:
+            return
+        if stacks[sid][-1] != pid:
+            raise RuntimeError(f"Cannot pick non-top stacked piece {pid}")
+        stacks[sid].pop()
+        piece_stack.pop(pid, None)
+        if len(stacks[sid]) <= 1:
+            if len(stacks[sid]) == 1:
+                piece_stack.pop(stacks[sid][0], None)
+            stacks.pop(sid, None)
+
+    def occupied_polys(exclude_pid=None):
+        occ = {}
+        for oid in all_ids:
+            if oid == exclude_pid:
+                continue
+            center = current_pose[oid]["center"]
+            theta = current_pose[oid]["theta"]
+            poly = poly_at(oid, center, theta)
+            if poly is not None:
+                occ[oid] = poly
+        return occ
+
+    def can_drop_final(pid):
+        if not is_top_pickable(pid):
+            return False
+        target_poly = poly_at(pid, final_centers[pid], final_thetas[pid])
+        if target_poly is None:
+            return True
+        occ = occupied_polys(exclude_pid=pid)
+        return not overlap_is_bad(
+            target_poly,
+            occ,
+            area_ratio_limit=area_ratio_limit,
+            abs_area_limit=abs_area_limit,
+        )
+
+    def blocker_score(pid):
+        target_poly = poly_at(pid, final_centers[pid], final_thetas[pid])
+        if target_poly is None:
+            return 0.0
+        score = 0.0
+        for oid, opoly in occupied_polys(exclude_pid=pid).items():
+            inter = target_poly.intersection(opoly)
+            if inter.is_empty:
+                continue
+            ratio = inter.area / max(1e-9, min(target_poly.area, opoly.area))
+            if ratio > area_ratio_limit:
+                score += ratio
+        return score
+
+    def overlap_ratio(a_poly, b_poly):
+        if a_poly is None or b_poly is None:
+            return 0.0
+        inter = a_poly.intersection(b_poly)
+        if inter.is_empty:
+            return 0.0
+        return inter.area / max(1e-9, min(a_poly.area, b_poly.area))
+
+    def best_stack_target(pid):
+        if not is_top_pickable(pid):
+            return None
+        best = None
+        top_supports = set()
+        for oid in all_ids:
+            sid = piece_stack.get(oid)
+            top = stacks[sid][-1] if sid is not None else oid
+            top_supports.add(top)
+
+        for support in sorted(top_supports):
+            if support == pid:
+                continue
+            support_depth = depth_of_support(support)
+            if support_depth >= max_layers:
+                continue
+
+            t_center = current_pose[support]["center"]
+            t_theta = current_pose[support]["theta"]
+            moved_poly = poly_at(pid, t_center, t_theta)
+            support_poly = poly_at(support, t_center, t_theta)
+            ov = overlap_ratio(moved_poly, support_poly)
+            if ov < min_stack_overlap:
+                continue
+
+            occ = occupied_polys(exclude_pid=pid)
+            sid = piece_stack.get(support)
+            if sid is None:
+                allowed_overlap_with = {support}
+            else:
+                allowed_overlap_with = set(stacks[sid])
+            filtered = {k: v for k, v in occ.items() if k not in allowed_overlap_with}
+            if overlap_is_bad(
+                moved_poly,
+                filtered,
+                area_ratio_limit=area_ratio_limit,
+                abs_area_limit=abs_area_limit,
+            ):
+                continue
+
+            # Prefer higher overlap and smaller travel.
+            travel = float(np.linalg.norm(np.asarray(t_center) - np.asarray(current_pose[pid]["center"])))
+            candidate = (-ov, travel, support)
+            if best is None or candidate < best[0]:
+                best = (candidate, {"support": support, "center": np.asarray(t_center), "theta": float(t_theta)})
+        return best[1] if best is not None else None
+
+    max_ops = len(all_ids) * 20
+    loops = 0
+    while final_remaining:
+        loops += 1
+        if loops > max_ops:
+            raise RuntimeError("Operation planning exceeded limit while resolving stack constraints.")
+
+        strict = [pid for pid in sorted(final_remaining) if can_drop_final(pid)]
+        if strict:
+            chosen = min(strict, key=lambda p: (blocker_score(p), p))
+            detach_from_stack(chosen)
+            operations.append({
+                "action": "final",
+                "piece_id": int(chosen),
+                "target_center": [float(final_centers[chosen][0]), float(final_centers[chosen][1])],
+                "target_theta": float(final_thetas[chosen]),
+            })
+            current_pose[chosen] = {"center": final_centers[chosen].copy(), "theta": float(final_thetas[chosen])}
+            state[chosen] = "final"
+            final_remaining.remove(chosen)
+            continue
+
+        # Deadlock: stack a top-pickable active piece onto another top support.
+        stage_choices = []
+        for pid in sorted(final_remaining):
+            if not is_top_pickable(pid):
+                continue
+            tgt = best_stack_target(pid)
+            if tgt is None:
+                continue
+            # Prefer staging the piece causing biggest blockage.
+            stage_choices.append((blocker_score(pid), pid, tgt))
+
+        if not stage_choices:
+            raise RuntimeError("Deadlock unresolved: no valid stacking move under 3-layer / 70% overlap rules.")
+
+        _, chosen, tgt = max(stage_choices, key=lambda x: (x[0], -x[1]))
+        detach_from_stack(chosen)
+
+        support = tgt["support"]
+        support_sid = piece_stack.get(support)
+        if support_sid is None:
+            sid = next_stack_id
+            next_stack_id += 1
+            stacks[sid] = [support, chosen]
+            piece_stack[support] = sid
+            piece_stack[chosen] = sid
+        else:
+            stacks[support_sid].append(chosen)
+            piece_stack[chosen] = support_sid
+
+        print(f"Deadlock detected. Stacking piece {chosen} on piece {support}.")
+        operations.append({
+            "action": "stage",
+            "piece_id": int(chosen),
+            "target_center": [float(tgt['center'][0]), float(tgt['center'][1])],
+            "target_theta": float(tgt["theta"]),
+        })
+        current_pose[chosen] = {"center": np.asarray(tgt["center"]), "theta": float(tgt["theta"])}
+
+    return operations, initial_centers, final_centers, final_thetas
+
+
 def side_key(pid, side_idx):
     return pid, side_idx
 
@@ -246,40 +484,52 @@ def build_piece_motion_plans(placements, pieces, piece_ids):
     return plans
 
 
-def write_assembly_steps_json(placements, pieces, piece_ids, out_path="assembly_steps.json"):
+def write_assembly_steps_json(
+    operations,
+    initial_centers,
+    out_path="assembly_steps.json",
+):
     steps = []
-    piece_plans = []
+    piece_state = {}
+    for pid, center in initial_centers.items():
+        piece_state[pid] = {"center": np.asarray(center, dtype=float), "theta": 0.0}
 
-    for plan in build_piece_motion_plans(placements, pieces, piece_ids):
-        pid = plan["piece_id"]
-        theta_deg = plan["rotate_degrees"]
-        move = plan["move"]
+    for idx, op in enumerate(operations):
+        pid = int(op["piece_id"])
+        curr_center = piece_state[pid]["center"]
+        curr_theta = float(piece_state[pid]["theta"])
+        target_center = np.asarray(op["target_center"], dtype=float)
+        target_theta = float(op["target_theta"])
 
-        piece_plans.append({
-            "piece_id": pid,
-            "rotate_degrees": theta_deg,
-            "move": {"x": move["x"], "y": move["y"]},
-        })
-
-        steps.append({"command": "pickup piece", "piece_id": pid})
-        steps.append({
-            "command": "rotate",
-            "piece_id": pid,
-            "degrees": theta_deg,
-        })
+        rotate_delta = float(target_theta - curr_theta)
+        move_delta = target_center - curr_center
+        steps.append({"command": "pickup piece"})
+        steps.append({"command": "rotate", "degrees": rotate_delta})
         steps.append({
             "command": "move",
-            "piece_id": pid,
-            "x": move["x"],
-            "y": move["y"],
+            "x": float(move_delta[0]),
+            "y": float(move_delta[1]),
         })
-        steps.append({"command": "drop piece", "piece_id": pid})
+        steps.append({"command": "drop piece"})
+
+        piece_state[pid]["center"] = target_center
+        piece_state[pid]["theta"] = target_theta
+
+        if idx < len(operations) - 1:
+            next_pid = int(operations[idx + 1]["piece_id"])
+            next_pick_xy = np.asarray(piece_state[next_pid]["center"], dtype=float)
+            transit = next_pick_xy - target_center
+            steps.append({"command": "rotate", "degrees": -rotate_delta})
+            steps.append({
+                "command": "move",
+                "x": float(transit[0]),
+                "y": float(transit[1]),
+            })
 
     payload = {
         "coordinate_frame": "image_xy",
         "rotation_convention": "positive_degrees_counterclockwise",
         "assumption": "rotate each picked piece around its current centroid, then apply move delta",
-        "piece_plans": piece_plans,
         "steps": steps,
     }
     with open(out_path, "w") as f:
@@ -415,6 +665,135 @@ def animate_assembly(placements, pieces, piece_ids, fps=14, show=True):
 
     anim = FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
     # Keep a hard reference on the figure so the animation object is not garbage-collected early.
+    fig._assembly_anim = anim
+    if show:
+        plt.show(block=True)
+    else:
+        plt.close(fig)
+    return True
+
+
+def animate_assembly_operations(
+    operations,
+    pieces,
+    piece_ids,
+    initial_centers,
+    fps=14,
+    show=True,
+):
+    if not operations:
+        return False
+
+    if show:
+        backend = str(plt.get_backend()).lower()
+        if "inline" in backend or "agg" in backend:
+            for candidate in ("MacOSX", "TkAgg", "Qt5Agg"):
+                try:
+                    plt.switch_backend(candidate)
+                    break
+                except Exception:
+                    continue
+
+    local_contours = {pid: np.asarray(pieces[pid]["contour"], dtype=float) for pid in piece_ids}
+    base_centers = {pid: np.asarray(initial_centers[pid], dtype=float) for pid in piece_ids}
+
+    # Build stable view bounds from all potential locations.
+    all_pts = []
+    for pid in piece_ids:
+        contour = local_contours[pid]
+        if len(contour) < 3:
+            continue
+        c0 = base_centers[pid]
+        all_pts.append((contour - c0) + np.asarray(initial_centers[pid], dtype=float))
+    for op in operations:
+        pid = int(op["piece_id"])
+        contour = local_contours[pid]
+        if len(contour) < 3:
+            continue
+        c0 = base_centers[pid]
+        ctr = np.asarray(op["target_center"], dtype=float)
+        theta_deg = float(op["target_theta"])
+        R = rot2d(math.radians(theta_deg))
+        all_pts.append((contour - c0) @ R.T + ctr)
+    if not all_pts:
+        return False
+    stacked = np.vstack(all_pts)
+    minx, miny = np.min(stacked[:, 0]), np.min(stacked[:, 1])
+    maxx, maxy = np.max(stacked[:, 0]), np.max(stacked[:, 1])
+    pad = 80.0
+
+    # Timeline synthesis based on actual operations.
+    initial_hold = 10
+    pickup_hold = 3
+    rotate_frames = 14
+    move_frames = 20
+    drop_hold = 3
+    end_hold = 16
+
+    states = {
+        pid: {"theta": 0.0, "center": np.asarray(initial_centers[pid], dtype=float)}
+        for pid in piece_ids
+    }
+
+    def snapshot(title):
+        poses = {pid: (float(s["theta"]), np.asarray(s["center"], dtype=float).copy()) for pid, s in states.items()}
+        return {"title": title, "poses": poses}
+
+    frames = [snapshot("Assembly Animation")] * initial_hold
+    for op in operations:
+        pid = int(op["piece_id"])
+        target_theta = float(op["target_theta"])
+        target_center = np.asarray(op["target_center"], dtype=float)
+
+        frames.extend([snapshot(f"Piece {pid}: pickup piece")] * pickup_hold)
+
+        start_theta = float(states[pid]["theta"])
+        start_center = np.asarray(states[pid]["center"], dtype=float).copy()
+        for i in range(rotate_frames):
+            prog = (i + 1) / rotate_frames
+            states[pid]["theta"] = (1.0 - prog) * start_theta + prog * target_theta
+            states[pid]["center"] = start_center
+            frames.append(snapshot(f"Piece {pid}: rotate"))
+        states[pid]["theta"] = target_theta
+
+        for i in range(move_frames):
+            prog = (i + 1) / move_frames
+            states[pid]["center"] = (1.0 - prog) * start_center + prog * target_center
+            frames.append(snapshot(f"Piece {pid}: move"))
+        states[pid]["center"] = target_center
+
+        frames.extend([snapshot(f"Piece {pid}: drop piece")] * drop_hold)
+
+    frames.extend([snapshot("Assembly Animation")] * end_hold)
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    cmap = plt.get_cmap("tab20")
+
+    def update(frame_idx):
+        ax.clear()
+        frame = frames[frame_idx]
+        poses = frame["poses"]
+        for i, pid in enumerate(piece_ids):
+            contour = local_contours[pid]
+            if len(contour) < 3:
+                continue
+            theta_deg, center = poses[pid]
+            R = rot2d(math.radians(theta_deg))
+            c0 = base_centers[pid]
+            pts = (contour - c0) @ R.T + center
+            ax.fill(pts[:, 0], pts[:, 1], color=cmap(i % 20), alpha=0.35)
+            ax.plot(pts[:, 0], pts[:, 1], color="black", linewidth=1.0)
+            c = pts.mean(axis=0)
+            ax.text(c[0], c[1], str(pid), ha="center", va="center", fontsize=9)
+
+        ax.set_title(frame["title"])
+        ax.set_aspect("equal")
+        ax.set_xlim(minx - pad, maxx + pad)
+        ax.set_ylim(maxy + pad, miny - pad)
+        ax.axis("off")
+        return []
+
+    anim = FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
     fig._assembly_anim = anim
     if show:
         plt.show(block=True)
@@ -840,10 +1219,27 @@ def solve(refresh_sides=False):
     fig.tight_layout()
     fig.savefig("results/solved_assembly.png", dpi=180)
     plt.close(fig)
-    write_assembly_steps_json(placements, pieces, piece_ids, out_path="assembly_steps.json")
+
+    operations, initial_centers, final_centers, final_thetas = build_non_overlapping_drop_order(
+        placements, pieces, piece_ids
+    )
+    execution_order = [op["piece_id"] for op in operations if op["action"] == "final"]
+    print(f"Execution order (non-overlapping final drops): {execution_order}")
+    write_assembly_steps_json(
+        operations,
+        initial_centers,
+        out_path="assembly_steps.json",
+    )
     animation_shown = False
     try:
-        animation_shown = animate_assembly(placements, pieces, piece_ids, fps=14, show=True)
+        animation_shown = animate_assembly_operations(
+            operations,
+            pieces,
+            piece_ids,
+            initial_centers,
+            fps=14,
+            show=True,
+        )
     except Exception as exc:
         print(f"Animation display skipped: {exc}")
 
